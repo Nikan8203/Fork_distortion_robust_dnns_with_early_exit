@@ -17,8 +17,9 @@ from torchvision import transforms, utils, datasets
 from torch.utils.data import Dataset, DataLoader, random_split, SubsetRandomSampler
 import copy
 import matplotlib.pyplot as plt
-from load_datasets import LoadDataset
+from utils import LoadDataset
 from PIL import Image
+import argparse
 
 class LoadDataset():
   def __init__(self, input_dim, batch_size_train, batch_size_test):
@@ -148,6 +149,9 @@ class QualityConverter():
     blurred = cv2.filter2D(imgarray, -1, motion_blur_kernel)
     cv2.normalize(blurred, blurred, 0, 255, cv2.NORM_MINMAX)
     return Image.fromarray(np.uint8(blurred), "RGB")
+  
+  def __applyPristine(self, img, distortion_lvl):
+    return transforms.ToPILImage()(img[0])
 
   def gausianBlur(self, distortion_lvl):
     self.distortion_type = "blur"
@@ -208,30 +212,30 @@ class QualityConverter():
       if (i >= end):
         break
 
+if __name__ == "__main__":
+  parser = argparse.ArgumentParser(description='Evaluating DNNs perfomance using distorted image: blur ou gaussian noise')
+  parser.add_argument('--distortion_type', type=str, default="pristine", 
+    choices=['pristine', 'gaussian_blur','gaussian_noise'], help='Distortion Type (default: pristine)')
+  parser.add_argument('--root_path', type=str, help='Path to the pristine Caltech256-dataset')
+  parser.add_argument('--save_path', type=str, help='Path to save the Fourier spectrum')
 
-parser = argparse.ArgumentParser(description='Evaluating DNNs perfomance using distorted image: blur ou gaussian noise')
-parser.add_argument('--distortion_type', type=str, default="pristine", 
-  choices=['pristine', 'gaussian_blur','gaussian_noise'], help='Distortion Type (default: pristine)')
-parser.add_argument('--root_path', type=str, help='Path to the pristine Caltech256-dataset')
-parser.add_argument('--save_path', type=str, help='Path to save the Fourier spectrum')
-
-args = parser.parse_args()
+  args = parser.parse_args()
 
 
-input_dim = 224
-batch_size_train, batch_size_test = 1, 1
-dataset = LoadDataset(input_dim, batch_size_train, batch_size_test)
-trainLoader, _, _ = dataset.customDataset(args.root_path, split_train=0.8)
-quality_converter = QualityConverter(trainLoader, "Caltech256", args.save_path)
-blur_lvl_list = [1, 2, 3, 4, 5]
-noise_lvl_list = [5, 10, 20, 30, 40]
+  input_dim = 224
+  batch_size_train, batch_size_test = 1, 1
+  dataset = LoadDataset(input_dim, batch_size_train, batch_size_test)
+  trainLoader, _, _ = dataset.customDataset(args.root_path, split_train=0.8)
+  quality_converter = QualityConverter(trainLoader, "Caltech256", args.save_path)
+  blur_lvl_list = [1, 2, 3, 4, 5]
+  noise_lvl_list = [5, 10, 20, 30, 40]
 
-if (args.distortion_type == "gaussian_blur"):
-  quality_converter.gausianBlur(blur_lvl_list)
+  if (args.distortion_type == "gaussian_blur"):
+    quality_converter.gausianBlur(blur_lvl_list)
 
-elif (args.distortion_type == "gaussian_noise"):
-  quality_converter.whiteGaussianNoise(noise_lvl_list)
+  elif (args.distortion_type == "gaussian_noise"):
+    quality_converter.whiteGaussianNoise(noise_lvl_list)
 
-else:
-  quality_converter.pristine()
+  else:
+    quality_converter.pristine()
 

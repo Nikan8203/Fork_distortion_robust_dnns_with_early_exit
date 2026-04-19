@@ -21,6 +21,7 @@ import copy
 import matplotlib.pyplot as plt
 from PIL import Image
 from distortionNet import DistortionNet
+import argparse
 
 class LoadDataset():
   def __init__(self, input_dim, batch_size_train, batch_size_test):
@@ -102,9 +103,10 @@ class EarlyStopping:
     self.shouldStop = False
 
   def __call__(self, val_loss, model, epoch, optimizer, val_acc):
-    if (self.best_loss is None):
+    if self.best_loss is None:
+      self.best_loss = val_loss
       self.save_checkpoint(val_loss, model, epoch, optimizer, val_acc)
-    elif (val_loss > (self.best_loss-delta)):
+    elif (val_loss > (self.best_loss - self.delta)):
       self.count += 1
       if (self.count > self.patience):
         self.shouldStop = True
@@ -145,64 +147,102 @@ def train(model, trainLoader, optimizer, criterion, epoch, device):
     #print("loss: %s"%(loss.item()))
 
   avg_acc, avg_loss = np.mean(acc_list), np.mean(loss_list)
-  print("Epoch: %s, Avg Train Loss: %s, Avg Train Acc: %s"%(epoch, avg_acc, avg_loss))
+  print("Epoch: %s, Avg Train Loss: %s, Avg Train Acc: %s" % (epoch, avg_loss, avg_acc))
   return avg_acc, avg_loss
 
 def evaluate(model, valLoader, criterion, epoch, device):
   loss_list = []
   acc_list = []
   model.eval()
-  for i, (data, target) in enumerate(valLoader):
-    data, target = data.to(device), target.to(device, dtype=torch.int64)
-    outputs = model(data)
-    loss = criterion(outputs, target)
-    loss_list.append(loss.item())
-    _, inf_label = torch.max(outputs, 1)
-    acc = 100*(inf_label.eq(target.view_as(inf_label)).sum().item()/data.size(0))
-    acc_list.append(acc)
+  with torch.no_grad():
+    for i, (data, target) in enumerate(valLoader):
+      data, target = data.to(device), target.to(device, dtype=torch.int64)
+      outputs = model(data)
+      loss = criterion(outputs, target)
+      loss_list.append(loss.item())
+      _, inf_label = torch.max(outputs, 1)
+      acc = 100*(inf_label.eq(target.view_as(inf_label)).sum().item()/data.size(0))
+      acc_list.append(acc)
 
-  avg_acc, avg_loss = np.mean(acc_list), np.mean(loss_list)
-  print("Epoch: %s, Avg Val Loss: %s, Avg Val Acc: %s"%(epoch, avg_acc, avg_loss))
-  return avg_acc, avg_loss
-
-
-
-parser = argparse.ArgumentParser(description='Evaluating DNNs perfomance using distorted image: blur ou gaussian noise')
-parser.add_argument('--distortion_type', type=str, default="pristine", 
-  choices=['pristine', 'gaussian_blur','gaussian_noise'], help='Distortion Type (default: pristine)')
-parser.add_argument('--root_path', type=str, help='Path to the distorted datasets')
-parser.add_argument('--save_path', type=str, help='Path to save the distortion classifier model')
-
-args = parser.parse_args()
+    avg_acc, avg_loss = np.mean(acc_list), np.mean(loss_list)
+    print("Epoch: %s, Avg Val Loss: %s, Avg Val Acc: %s" % (epoch, avg_loss, avg_acc))
+    return avg_acc, avg_loss
 
 
-input_dim = 224
-batch_size_train, batch_size_test = 128, 128
-root_path = args.root_path
-dataset = LoadDataset(input_dim, batch_size_train, batch_size_test)
-trainLoader, valLoader, testLoader = dataset.customDataset(root_path, split_train=0.8)
-num_epochs = 50
-learning_rate = 0.001
-weight_decay = 0.0005
-patience = 10
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-saveModelPath = args.save_path
-saveHistoryPath = "./distortion_classifier_history.pdf"
-model = DistortionNet().to(device)
-optimizer = optim.Adam(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
-criterion = nn.CrossEntropyLoss().to(device)
-train_loss_list, val_loss_list = [], []
-early_stopping = EarlyStopping(patience=patience, savePath=saveModelPath)
-scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min')
+if __name__ == "__main__":
+  parser = argparse.ArgumentParser(description='Evaluating DNNs perfomance using distorted image: blur ou gaussian noise')
+  parser.add_argument('--distortion_type', type=str, default="pristine", 
+    choices=['pristine', 'gaussian_blur','gaussian_noise'], help='Distortion Type (default: pristine)')
+  parser.add_argument('--root_path', type=str, help='Path to the distorted datasets')
+  parser.add_argument('--save_path', type=str, help='Path to save the distortion classifier model')
 
-for epoch in range(1, num_epochs + 1):
-  print("Epoch: %s"%(epoch))
-  train_accuracy, train_loss = train(model, trainLoader, optimizer, criterion, epoch, device)
-  val_accuracy, val_loss = evaluate(model, valLoader, criterion, epoch, device)
-  scheduler.step(val_loss)
-  train_loss_list.append(train_loss)
-  val_loss_list.append(val_loss)
-  early_stopping(val_loss, model, epoch, optimizer, val_accuracy)
-  if (early_stopping.shouldStop):
-    print("STOP!")
-    break
+  args = parser.parse_args()
+
+
+  input_dim = 224
+  batch_size_train, batch_size_test = 128, 128
+  root_path = args.root_path
+  dataset = LoadDataset(input_dim, batch_size_train, batch_size_test)
+  trainLoader, valLoader, testLoader = dataset.customDataset(root_path, split_train=0.8)
+  num_epochs = 50
+  learning_rate = 0.001
+  weight_decay = 0.0005
+  patience = 10
+  device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+  saveModelPath = args.save_path
+  saveHistoryPath = "./distortion_classifier_history.pdf"
+  model = DistortionNet().to(device)
+  optimizer = optim.Adam(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
+  criterion = nn.CrossEntropyLoss().to(device)
+  train_loss_list, val_loss_list = [], []
+  train_acc_list, val_acc_list = [], []
+  early_stopping = EarlyStopping(patience=patience, savePath=saveModelPath)
+  scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min')
+
+  for epoch in range(1, num_epochs + 1):
+    print("Epoch: %s"%(epoch))
+    train_accuracy, train_loss = train(model, trainLoader, optimizer, criterion, epoch, device)
+    val_accuracy, val_loss = evaluate(model, valLoader, criterion, epoch, device)
+    scheduler.step(val_loss)
+    train_loss_list.append(train_loss)
+    val_loss_list.append(val_loss)
+    train_acc_list.append(train_accuracy)
+    val_acc_list.append(val_accuracy)
+    early_stopping(val_loss, model, epoch, optimizer, val_accuracy)
+    if (early_stopping.shouldStop):
+      print("STOP!")
+      break
+
+  # Load the best model, before the actual final test evaluation
+  checkpoint = torch.load(saveModelPath, map_location=device)
+  model.load_state_dict(checkpoint["model_state_dict"])
+
+  test_accuracy, test_loss = evaluate(model, testLoader, criterion, "Test", device)
+  print("Test Loss: %s, Test Acc: %s" % (test_loss, test_accuracy))
+
+  epochs = range(1, len(train_loss_list) + 1)
+
+  # The acc plot
+  plt.figure()
+  plt.plot(epochs, train_acc_list, label="Training Accuracy")
+  plt.plot(epochs, val_acc_list, label="Validation Accuracy")
+  plt.axhline(y=test_accuracy, color='g', linestyle='--', label="Testing Accuracy")
+  plt.xlabel("Epochs")
+  plt.ylabel("Accuracies in percent")
+  plt.title("Training and Validation Accuracies")
+  plt.legend()
+  plt.grid(True)
+  plt.savefig(os.path.join("experiments", "1_distortion_classifier_accuracy_plot.png"), 
+              bbox_inches="tight")
+  # The loss plot
+  plt.figure()
+  plt.plot(epochs, train_loss_list, label="Training Loss")
+  plt.plot(epochs, val_loss_list, label="Validation Loss")
+  plt.xlabel("Epochs")
+  plt.ylabel("Losses")
+  plt.title("Training and Validation Losses")
+  plt.legend()
+  plt.grid(True)
+  plt.savefig(os.path.join("experiments", "2_distortion_classifier_loss_plot.png"), 
+              bbox_inches="tight")
+  plt.close()
